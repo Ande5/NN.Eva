@@ -1,10 +1,8 @@
-﻿using MySql.Data.MySqlClient;
-using NN.Eva.Models;
+﻿using NN.Eva.Models;
 using NN.Eva.Services;
 using System;
-using System.Collections.Generic;
 using System.IO;
-using System.Text;
+using System.Collections.Generic;
 using System.Threading;
 using NN.Eva.Core.Database;
 using NN.Eva.Models.Database;
@@ -15,7 +13,7 @@ namespace NN.Eva.Core
     {
         private NeuralNetwork _net;
 
-        private NetworkStructure _netStructure;
+        private NetworkStructure _networkStructure;
 
         /// <summary>
         /// Services
@@ -34,19 +32,24 @@ namespace NN.Eva.Core
         /// </summary>
         public List<TrainObject> TestVectors { get; set; }
 
-        public NetworksTeacher(NetworkStructure netStructure, FileManager fileManager)
+        public NetworksTeacher(NetworkStructure networkStructure, FileManager fileManager)
         {
-            _netStructure = netStructure;
+            _networkStructure = networkStructure;
 
             _fileManager = fileManager;
+            _memoryChecker = new MemoryChecker();
             _logger = new Logger();
 
+            if (!_memoryChecker.IsValid(_fileManager.MemoryFolderPath + "//.clear//memoryClear.txt", networkStructure))
+            {
+                _logger.LogError(ErrorType.MemoryInitializeError);
+                return;
+            }
+                
             try
             {
                 // Ицициализация сети по одинаковому шаблону:
-                _net = new NeuralNetwork(netStructure.InputVectorLength,
-                        netStructure.NeuronsByLayers,
-                        fileManager, "memory.txt");
+                _net = new NeuralNetwork(networkStructure.NeuronsByLayers, _fileManager, "memory.txt");
             }
             catch (Exception ex)
             {
@@ -56,51 +59,30 @@ namespace NN.Eva.Core
 
         #region Trained testing
 
-        public void CommonTest()
+        /// <summary>
+        /// Common test data from TestVector datafile
+        /// </summary>
+        /// <param name="isColorized"></param>
+        public void CommonTest(bool isColorized = false)
         {
             if (TestVectors == null) return;
-
-            var result = new StringBuilder();
-            TestVectors.ForEach(vector => result.Append($"   {vector._content}     "));
-            result.Append('\n');
 
             for (int k = 0; k < TestVectors.Count; k++)
             {
                 // Получение ответа:
-                var outputVector = _net.Handle(TestVectors[k]._vectorValues);
+                string handlingErrorText = "";
+                var outputVector = _net.Handle(TestVectors[k]._vectorValues, ref handlingErrorText);
 
-                result.Append($"{outputVector[0]:f5}\t");
-            }
-            result.Append('\n');
-
-            Console.WriteLine(result);
-        }
-
-        public void CommonTestColorized()
-        {
-            if (TestVectors == null) return;
-
-            var result = new StringBuilder();
-            TestVectors.ForEach(vector => result.Append($"   {vector._content}     "));
-            result.Append('\n');
-
-            for (int k = 0; k < TestVectors.Count; k++)
-            {
-                // Получение ответа:
-                var outputVector = _net.Handle(TestVectors[k]._vectorValues);
-
-                try
+                if (outputVector != null)
                 {
-                    // Костыль: для корректного теста сетям нужна по крайней мере одна итерация обучения:
-                    _net.Teach(TestVectors[k]._vectorValues, new double[1] { 1 }, 0.01); //0.000000000000001);
+                    Console.ForegroundColor = GetColorByActivation(outputVector[0]);
+                    Console.Write($"{outputVector[0]:f5}\t");
                 }
-                catch (Exception ex)
+                else
                 {
-                    _logger.LogError(ErrorType.TrainError, ex);
+                    _logger.LogError(ErrorType.NonEqualsInputLengths, handlingErrorText);
+                    break;
                 }
-
-                Console.ForegroundColor = GetColorByActivation(outputVector[0]);
-                Console.Write($"{outputVector[0]:f5}\t");
             }
 
             Console.ForegroundColor = ConsoleColor.Gray;
@@ -127,7 +109,12 @@ namespace NN.Eva.Core
             return ConsoleColor.Gray;
         }
 
-        public void PrintLearnStatistic(TrainingConfiguration trainingConfig, bool withLogging = false)
+        /// <summary>
+        /// Printing network's learning statistic
+        /// </summary>
+        /// <param name="trainingConfig"></param>
+        /// <param name="withLogging"></param>
+        public void PrintLearningStatistic(TrainingConfiguration trainingConfig, bool withLogging = false, string elapsedTime = "")
         {
             Console.WriteLine("Start calculating statistic...");
 
@@ -155,22 +142,31 @@ namespace NN.Eva.Core
             for (int i = 0; i < inputDataSets.Count; i++)
             {
                 // Получение ответа:
-                double[] netResult = _net.Handle(inputDataSets[i]);
+                string handlingErrorText = "";
+                double[] netResult = _net.Handle(inputDataSets[i], ref handlingErrorText);
 
-                if (IsVectorsRoughlyEquals(outputDataSets[i], netResult, 0.3))
+                if (netResult != null)
                 {
-                    testPassed++;
+                    if (IsVectorsRoughlyEquals(outputDataSets[i], netResult, 0.3))
+                    {
+                        testPassed++;
+                    }
+                    else
+                    {
+                        testFailed++;
+                    }
                 }
                 else
                 {
-                    testFailed++;
+                    _logger.LogError(ErrorType.NonEqualsInputLengths, handlingErrorText);
+                    return;
                 }
             }
 
             // Logging (optional):
             if (withLogging)
             {
-                _logger.LogTrainResults(testPassed, testFailed, Iteration);
+                _logger.LogTrainingResults(testPassed, testFailed, trainingConfig, elapsedTime);
             }
 
             Console.WriteLine("Test passed: {0}\nTest failed: {1}\nPercent learned: {2:f2}", testPassed,
@@ -188,7 +184,6 @@ namespace NN.Eva.Core
 
             for(int i = 0; i < sourceVector0.Length; i++)
             {
-                // TODO: Сделать универсальную формулу подсчета:
                 if (controlVector1[i] < sourceVector0[i] - equalsPercent || controlVector1[i] > sourceVector0[i] + equalsPercent)
                 {
                     return false;
@@ -200,17 +195,22 @@ namespace NN.Eva.Core
 
         #endregion
 
+        #region Memory checking
+
+        /// <summary>
+        /// Checking network's memory validity
+        /// </summary>
+        /// <param name="memoryFolder"></param>
+        /// <returns></returns>
         public bool CheckMemory(string memoryFolder = "Memory")
         {
             bool isValid = true;
 
-            Console.WriteLine("Start memory cheking...");
+            Console.WriteLine("Start memory cheсking...");
 
-            _memoryChecker = new MemoryChecker();
-
-            bool isCurrentNetMemoryValid = _netStructure == null
-                ? _memoryChecker.IsValidQuickCheck(memoryFolder + "//memory.txt")
-                : _memoryChecker.IsValid(memoryFolder + "//memory.txt", _netStructure) &&
+            bool isCurrentNetMemoryValid = _networkStructure == null ?
+                _memoryChecker.IsFileNotCorrupted(memoryFolder + "//memory.txt")
+                : _memoryChecker.IsValid(memoryFolder + "//memory.txt", _networkStructure) &&
                   _fileManager.IsMemoryEqualsDefault("memory.txt");
 
             if (isCurrentNetMemoryValid)
@@ -230,57 +230,17 @@ namespace NN.Eva.Core
             return isValid;
         }
 
-        public void BackupMemory(string memoryFolder = "Memory", string backupsDirectoryName = ".memory_backups",
-                                 DatabaseConfig dbConfig = null, string networkStructureInfo = "no information")
-        {
-            // Check for existing main backups-directory:
-            if (!Directory.Exists(memoryFolder + "//" + backupsDirectoryName))
-            {
-                Directory.CreateDirectory(memoryFolder + "//" + backupsDirectoryName);
-            }
-
-            // Check for already-existing sub-directory (trainCount-named):
-            if (!Directory.Exists(memoryFolder + "//" + backupsDirectoryName + "//" + Iteration))
-            {
-                Directory.CreateDirectory(memoryFolder + "//" + backupsDirectoryName + "//" + Iteration);
-            }
-
-            // Saving memory:
-            _net.SaveMemory(memoryFolder + "//" + backupsDirectoryName + "//" + Iteration + "//memory.txt", _netStructure);
-
-            // Parsing userID:
-            string[] memoryFolderPathArray = memoryFolder.Split('/');
-            Guid userId;
-
-            for (int i = 0; i < memoryFolderPathArray.Length; i++)
-            {
-                try
-                {
-                    userId = Guid.Parse(memoryFolder.Split('/')[i]);
-                    break;
-                }
-                catch { }
-            }
-
-            // Saving memory to database:
-            if (dbConfig != null)
-            {
-                Console.WriteLine("Backuping memory to database...");
-
-                SavingMemoryToDB(dbConfig, networkStructureInfo, userId);
-            }
-
-            Console.WriteLine("Memory backuped!");
-        }
+        #endregion
 
         #region Training
 
         /// <summary>
         /// Обучение сети
         /// </summary>
-        /// <param name="startIteration"></param>
-        /// <param name="withSort"></param>
-        public void TrainNet(TrainingConfiguration trainingConfig, int iterationsToPause)
+        /// <param name="trainingConfig"></param>
+        /// <param name="iterationsToPause"></param>
+        /// <param name="unsafeTrainingMode"></param>
+        public void TrainNet(TrainingConfiguration trainingConfig, int iterationsToPause, bool unsafeTrainingMode = false)
         {
             Iteration = trainingConfig.EndIteration;
 
@@ -308,24 +268,30 @@ namespace NN.Eva.Core
                 List<TrainingConfiguration> trainingConfigs = InitializeTrainingSubConfigs(trainingConfig, iterationsToPause);
 
                 // Initialize teachers:
-                SingleNetworkTeacher netTeacher = new SingleNetworkTeacher
+                SingleNetworkTeacher netSubTeacher = new SingleNetworkTeacher
                 {
                     Network = _net,
-                    NetworkStructure = _netStructure,
+                    NetworkStructure = _networkStructure,
                     TrainingConfiguration = trainingConfig,
                     InputDatasets = inputDataSets,
                     OutputDatasets = outputDataSets,
-                    Logger = _logger
+                    Logger = _logger,
+                    SafeTrainingMode = !unsafeTrainingMode
                 };
 
                 // Iteration multithreading train:
                 for (int j = 0; j < trainingConfigs.Count; j++)
                 {
-                    netTeacher.TrainingConfiguration = trainingConfigs[j];
+                    netSubTeacher.TrainingConfiguration = trainingConfigs[j];
 
-                    Thread thread = new Thread(netTeacher.Train);
+                    Thread thread = new Thread(netSubTeacher.Train);
                     thread.Start();
                     Wait(thread);
+
+                    if (!netSubTeacher.LastTrainingSuccess)
+                    {
+                        return;
+                    }
 
                     if (j != trainingConfigs.Count - 1)
                     {
@@ -336,11 +302,25 @@ namespace NN.Eva.Core
                         Console.WriteLine("Iterations already finished: " + trainingConfig.EndIteration);
                     }
 
-                    CommonTestColorized();
+                    // Test after this iteration's part
+                    CommonTest(true);
                 }
 
-                // ПОлучение обученной сети:
-                _net = netTeacher.Network;
+                // Проведение завершающих операций после обучения модели:
+                switch (trainingConfig.TrainingAlgorithmType)
+                {
+                    // В случае обучения по генетическому алгоритму - загрузка памяти из файла:
+                    case TrainingAlgorithmType.GeneticAlg:
+                        // Загрузка только что сохраненной памяти:
+                        _net = new NeuralNetwork(_networkStructure.NeuronsByLayers, _fileManager, "memory.txt");
+                        break;
+                    // В общем случае - получение данных обученной сети от "подучителя":
+                    case TrainingAlgorithmType.BProp:
+                    case TrainingAlgorithmType.RProp:
+                    default:
+                        _net = netSubTeacher.Network;
+                        break;
+                }
 
                 Console.WriteLine("Training success!");
             }
@@ -372,6 +352,7 @@ namespace NN.Eva.Core
                 {
                     var trainingConfigItem = new TrainingConfiguration
                     {
+                        TrainingAlgorithmType = trainingConfig.TrainingAlgorithmType,
                         StartIteration = currentIterPosition,
                         EndIteration = currentIterPosition + iterationsToPause,
                         MemoryFolder = trainingConfig.MemoryFolder,
@@ -387,6 +368,7 @@ namespace NN.Eva.Core
                 {
                     var trainingConfigItem = new TrainingConfiguration
                     {
+                        TrainingAlgorithmType = trainingConfig.TrainingAlgorithmType,
                         StartIteration = currentIterPosition,
                         EndIteration = trainingConfig.EndIteration,
                         MemoryFolder = trainingConfig.MemoryFolder,
@@ -407,7 +389,60 @@ namespace NN.Eva.Core
 
         #endregion
 
-        #region Database
+        #region Database actions
+
+        /// <summary>
+        /// Saving network's memory to local folder OR/AND to database
+        /// </summary>
+        /// <param name="memoryFolder"></param>
+        /// <param name="backupsDirectoryName"></param>
+        /// <param name="dbConfig"></param>
+        /// <param name="networkStructureInfo"></param>
+        public void BackupMemory(string memoryFolder = "Memory", string backupsDirectoryName = ".memory_backups",
+            DatabaseConfig dbConfig = null, string networkStructureInfo = "no information")
+        {
+            // Check for existing main backups-directory:
+            if (!Directory.Exists(memoryFolder + "//" + backupsDirectoryName))
+            {
+                Directory.CreateDirectory(memoryFolder + "//" + backupsDirectoryName);
+            }
+
+            // Creating path of backuped memory:
+            string backupedMemoryFoldersPath = $"{memoryFolder}//{backupsDirectoryName}//{DateTime.Now.Day}_{DateTime.Now.Month}_{DateTime.Now.Year}_{DateTime.Now.Ticks}_{Iteration}";
+
+            // Check for already-existing sub-directory (trainCount-named):
+            if (!Directory.Exists(backupedMemoryFoldersPath))
+            {
+                Directory.CreateDirectory(backupedMemoryFoldersPath);
+            }
+
+            // Saving memory:
+            _net.SaveMemory(backupedMemoryFoldersPath + "//memory.txt", _networkStructure);
+
+            // Parsing userID:
+            string[] memoryFolderPathArray = memoryFolder.Split('/');
+            Guid userId;
+
+            for (int i = 0; i < memoryFolderPathArray.Length; i++)
+            {
+                try
+                {
+                    userId = Guid.Parse(memoryFolder.Split('/')[i]);
+                    break;
+                }
+                catch { }
+            }
+
+            // Saving memory to database:
+            if (dbConfig != null)
+            {
+                Console.WriteLine("Backuping memory to database...");
+
+                SavingMemoryToDB(dbConfig, networkStructureInfo, userId);
+            }
+
+            Console.WriteLine("Memory backuped!");
+        }
 
         private void SavingMemoryToDB(DatabaseConfig dbConfig, string networkStructure, Guid userId)
         {
@@ -419,7 +454,7 @@ namespace NN.Eva.Core
 
                 // Saving networks info:
                 _net.SaveMemoryToDB(Iteration, networkStructure, userId, dbInserter);
-                    Console.WriteLine("Networks memory backuped successfully!");
+                Console.WriteLine("Networks memory backuped to database successfully!");
             }
             catch (Exception ex)
             {
@@ -428,6 +463,10 @@ namespace NN.Eva.Core
             }
         }
 
+        /// <summary>
+        /// Deleting network's memory from database
+        /// </summary>
+        /// <param name="dbConfig"></param>
         public void DBMemoryAbort(DatabaseConfig dbConfig)
         {
             Logger logger = new Logger();
@@ -447,6 +486,12 @@ namespace NN.Eva.Core
             }
         }
 
+        /// <summary>
+        /// Load network's memory from database
+        /// </summary>
+        /// <param name="dbConfig"></param>
+        /// <param name="networkID"></param>
+        /// <param name="destinationMemoryFilePath"></param>
         public void DBMemoryLoad(DatabaseConfig dbConfig, Guid networkID, string destinationMemoryFilePath)
         {
             Logger logger = new Logger();
@@ -495,7 +540,7 @@ namespace NN.Eva.Core
                 }
 
                 // Saving memory from textList:
-                _fileManager.SaveMemoryFromModel(memoryInTextList, destinationMemoryFilePath);
+                _fileManager.SaveMemoryFromModel(networkStructure, memoryInTextList, destinationMemoryFilePath);
             }
             catch (Exception ex)
             {
@@ -512,7 +557,18 @@ namespace NN.Eva.Core
         {
             try
             {
-                return _net.Handle(data);
+                string handlingErrorText = "";
+                double[] netResult =  _net.Handle(data, ref handlingErrorText);
+
+                if (netResult == null)
+                {
+                    _logger.LogError(ErrorType.NonEqualsInputLengths, handlingErrorText);
+                    return null;
+                }
+                else
+                {
+                    return netResult;
+                }
             }
             catch
             {

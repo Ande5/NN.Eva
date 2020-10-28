@@ -1,6 +1,8 @@
 ﻿using NN.Eva.Models;
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Management;
 
 namespace NN.Eva.Services
 {
@@ -21,7 +23,7 @@ namespace NN.Eva.Services
             _errorLogsDirectoryName = errorLogsDirectoryName;
         }
 
-        public void LogTrainResults(int testPassed, int testFailed, int iteration)
+        public void LogTrainingResults(int testPassed, int testFailed, TrainingConfiguration trainConfig, string elapsedTime)
         {
             // Check for existing this logs-directory:
             if (!Directory.Exists(_trainLogsDirectoryName))
@@ -30,44 +32,81 @@ namespace NN.Eva.Services
             }
 
             // Save log:
-            using (StreamWriter fileWriter = new StreamWriter(_trainLogsDirectoryName + "/" + iteration + ".txt"))
+            using (StreamWriter fileWriter = new StreamWriter(_trainLogsDirectoryName + "/" + trainConfig.EndIteration + ".txt"))
             {
                 fileWriter.WriteLine("Test passed: " + testPassed);
                 fileWriter.WriteLine("Test failed: " + testFailed);
                 fileWriter.WriteLine("Percent learned: {0:f2}", (double)testPassed * 100 / (testPassed + testFailed));
+                
+                // Writing additional training data:
+                fileWriter.WriteLine("\n============================\n");
+
+                // Writing elapsed time: 
+                if(elapsedTime != "")
+                {
+                    fileWriter.WriteLine("Time spend: " + elapsedTime);
+                    fileWriter.WriteLine("Start iteration: " + trainConfig.StartIteration);
+                    fileWriter.WriteLine("End iteration: " + trainConfig.EndIteration);
+                    fileWriter.WriteLine("============================\n");
+                }
+
+                // Writing system characteristics:
+                fileWriter.WriteLine("System characteristics:");
+                fileWriter.WriteLine("OS Version: {0} {1}", Environment.OSVersion, Environment.Is64BitOperatingSystem ? "64 bit" : "32 bit");
+                fileWriter.WriteLine("Processors count: " + Environment.ProcessorCount);
+
+                ManagementClass myManagementClass = new ManagementClass("Win32_Processor");
+                PropertyDataCollection myProperties = myManagementClass.Properties;
+
+                foreach (var myProperty in myProperties)
+                {
+                    switch (myProperty.Name)
+                    {
+                        case "CurrentClockSpeed":
+                        case "Name":
+                            fileWriter.WriteLine($"{myProperty.Name}: { myProperty.Value ?? "-"}");
+                            break;
+                    }
+                }
             }
 
             Console.WriteLine("Learn statistic logs saved in {0}!", _trainLogsDirectoryName);
         }
 
-        public void LogTrainResults(int testPassed, int testFailed, int testFailedLowActivationCause, int iteration)
+        public void LogWarning(WarningType warningType)
         {
-            // Check for existing this logs-directory:
-            if (!Directory.Exists(_trainLogsDirectoryName))
-            {
-                Directory.CreateDirectory(_trainLogsDirectoryName);
-            }
-
-            // Save log:
-            using (StreamWriter fileWriter = new StreamWriter(_trainLogsDirectoryName + "/" + iteration + ".txt"))
-            {
-                fileWriter.WriteLine("Test passed: " + testPassed);
-                fileWriter.WriteLine("Test failed: " + testFailed);
-                fileWriter.WriteLine("     - Low activation causes: " + testFailedLowActivationCause);
-                fileWriter.WriteLine("Percent learned: {0:f2}", (double)testPassed * 100 / (testPassed + testFailed));
-            }
-
-            Console.WriteLine("Learn statistic logs saved in {0}!", _trainLogsDirectoryName);
+            WriteLog(GetWarningTextByType(warningType));
         }
 
         public void LogError(ErrorType errorType, Exception ex)
         {
-            WriteError(GetErrorTextByType(errorType) + ex);
+            WriteLog(GetErrorTextByType(errorType), ex.Message);
         }
 
         public void LogError(ErrorType errorType, string errorText = "")
         {
-            WriteError(GetErrorTextByType(errorType) + errorText);
+            WriteLog(GetErrorTextByType(errorType), errorText);
+        }
+
+        private string GetWarningTextByType(WarningType warningType)
+        {
+            string warningText;
+
+            switch (warningType)
+            {
+                case WarningType.UsingUnsafeTrainingMode:
+                    warningText = "You are using unsafe training mode! Make sure that your input-vectors lengths are equals with Network's ones!";
+                    break;
+                default:
+                    warningText = "";
+                    break;
+            }
+
+            Console.ForegroundColor = ConsoleColor.DarkYellow;
+            Console.WriteLine("[WARNING] " + warningText);
+            Console.ForegroundColor = ConsoleColor.Gray;
+
+            return warningText + "\n";
         }
 
         private string GetErrorTextByType(ErrorType errorType)
@@ -100,16 +139,29 @@ namespace NN.Eva.Services
                 case ErrorType.DBDeleteError:
                     errorText = "Database deleting error!";
                     break;
+                case ErrorType.DBMemoryLoadError:
+                    errorText = "Database loading error!";
+                    break;
+                case ErrorType.NonEqualsInputLengths:
+                    errorText = "Length of network's input vector and length of training dataset's vector is not equals!";
+                    break;
+                case ErrorType.OperationWithNonexistentNetwork:
+                    errorText = "Error in operation with nonexistent network! Please, create the Network first!";
+                    break;
+                case ErrorType.UnknownError:
                 default:
-                    errorText = "";
+                    errorText = "Unknown error!";
                     break;
             }
 
-            Console.WriteLine(errorText);
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.WriteLine("[ERROR] " + errorText);
+            Console.ForegroundColor = ConsoleColor.Gray;
+
             return errorText + "\n";
         }
 
-        private void WriteError(string error)
+        private void WriteLog(string systemErrorText, string additionalErrorText = "")
         {
             // Check for existing this logs - directory:
             if (!Directory.Exists(_errorLogsDirectoryName))
@@ -128,7 +180,12 @@ namespace NN.Eva.Services
                                                                                           ".txt"))
                 {
                     fileWriter.WriteLine("\nTime: " + DateTime.Now);
-                    fileWriter.WriteLine(error);
+                    fileWriter.WriteLine("System error text: " + systemErrorText);
+
+                    if (additionalErrorText != "")
+                    {
+                        fileWriter.Write("Additional error text: " + additionalErrorText);
+                    }
                 }
 
                 Console.WriteLine("Error log saved in {0}!", _errorLogsDirectoryName);

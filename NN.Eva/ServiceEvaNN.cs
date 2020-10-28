@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Diagnostics;
-using MySql.Data.MySqlClient;
 using NN.Eva.Core;
 using NN.Eva.Models;
 using NN.Eva.Models.Database;
@@ -11,14 +10,14 @@ namespace NN.Eva
     public class ServiceEvaNN
     {
         private FileManager _fileManager;
-        private NetworksTeacher _networkTeacher;
+
+        private NetworksTeacher _networkTeacher = null;
 
         /// <summary>
-        /// Creating FFNN
+        /// Creating FeedForward - Neural Network
         /// </summary>
         /// <param name="memoryFolderName"></param>
         /// <param name="networkStructure"></param>
-        /// <param name="netsCountInAssembly"></param>
         /// <param name="testDatasetPath"></param>
         /// <returns>Returns success result of network creating</returns>
         public bool CreateNetwork(string memoryFolderName, NetworkStructure networkStructure,
@@ -28,7 +27,14 @@ namespace NN.Eva
 
             if(_fileManager.IsMemoryLoadCorrect)
             {
-                _networkTeacher = new NetworksTeacher(networkStructure, _fileManager);
+                try
+                {
+                    _networkTeacher = new NetworksTeacher(networkStructure, _fileManager);
+                }
+                catch
+                {
+                    return false;
+                }
 
                 if (testDatasetPath != null)
                 {
@@ -44,15 +50,45 @@ namespace NN.Eva
         }
 
         /// <summary>
-        /// Training FFNN
+        /// Training FeedForward - NeuralNetwork
         /// </summary>
         /// <param name="trainingConfiguration"></param>
-        /// <param name="iterationToPause"></param>
         /// <param name="printLearnStatistic"></param>
         /// <param name="processPriorityClass"></param>
-        public void Train(TrainingConfiguration trainingConfiguration, int iterationToPause = 100, bool printLearnStatistic = false, ProcessPriorityClass processPriorityClass = ProcessPriorityClass.Normal)
+        /// <param name="unsafeTrainingMode"></param>
+        /// <param name="iterationsToPause"></param>
+        public void Train(TrainingConfiguration trainingConfiguration, 
+                          bool printLearnStatistic = false,
+                          ProcessPriorityClass processPriorityClass = ProcessPriorityClass.Normal,
+                          bool unsafeTrainingMode = false,
+                          int iterationsToPause = -1)
         {
+            // Check for unexistent network:
+            if (_networkTeacher == null)
+            {
+                Logger localLogger = new Logger();
+                localLogger.LogError(ErrorType.OperationWithNonexistentNetwork, "Training failed!");
+                return;
+            }
+
+            // Check for set of iterations to pause:
+            if (iterationsToPause == -1)
+            {
+                iterationsToPause = trainingConfiguration.EndIteration - trainingConfiguration.StartIteration;
+            }
+
+            // Print warning about using unsafe mode:
+            if (unsafeTrainingMode)
+            {
+                Logger localLogger = new Logger();
+                localLogger.LogWarning(WarningType.UsingUnsafeTrainingMode);
+            }
+
             trainingConfiguration.MemoryFolder = trainingConfiguration.MemoryFolder == "" ? "Memory" : trainingConfiguration.MemoryFolder;
+
+            // Start process timer:
+            Stopwatch stopWatch = new Stopwatch();
+            stopWatch.Start();
 
             // Set the process priority class:
             Process thisProc = Process.GetCurrentProcess();
@@ -60,16 +96,24 @@ namespace NN.Eva
 
             if (_networkTeacher.CheckMemory(trainingConfiguration.MemoryFolder))
             {
-                _networkTeacher.TrainNet(trainingConfiguration, iterationToPause);
+                _networkTeacher.TrainNet(trainingConfiguration, iterationsToPause, unsafeTrainingMode);
+
+                // Stopping timer and print spend time in [HH:MM:SS]:
+                stopWatch.Stop();
+                TimeSpan ts = stopWatch.Elapsed;
+
+                string elapsedTime = String.Format("{0:00}:{1:00}:{2:00}", ts.Hours, ts.Minutes, ts.Seconds);
+                Console.WriteLine("Time spend: " + elapsedTime);
 
                 if (printLearnStatistic)
                 {
-                    _networkTeacher.PrintLearnStatistic(trainingConfiguration, true);
+                    _networkTeacher.PrintLearningStatistic(trainingConfiguration, true, elapsedTime);
                 }
             }
             else
             {
-                Console.WriteLine("Train failed! Invalid memory!");
+                stopWatch.Stop();
+                Console.WriteLine("Training failed! Invalid memory!");
             }
         }
 
@@ -80,6 +124,13 @@ namespace NN.Eva
         /// <returns>Vector-classes</returns>
         public double[] Handle(double[] data)
         {
+            if (_networkTeacher == null)
+            {
+                Logger localLogger = new Logger();
+                localLogger.LogError(ErrorType.TrainError, "Training failed! Please, create the Network first!");
+                return null;
+            }
+
             try
             {
                 return _networkTeacher.Handle(data);
@@ -90,20 +141,39 @@ namespace NN.Eva
             }
         }
 
+        public void CalculateStatistic(TrainingConfiguration trainingConfig)
+        {
+            if (_networkTeacher == null)
+            {
+                Logger localLogger = new Logger();
+                localLogger.LogError(ErrorType.OperationWithNonexistentNetwork, "Calculate statistic failed!");
+                return;
+            }
+
+            _networkTeacher.PrintLearningStatistic(trainingConfig, true);
+        }
+
         /// <summary>
-        /// Backuping memory to db or local folder or to both ones
+        /// Backuping network's memory to db OR/AND local folder
         /// </summary>
         /// <param name="memoryFolder"></param>
-        /// <param name="dbConnection"></param>
-        /// <param name="networkStructure"></param>
+        /// <param name="dbConfig"></param>
+        /// <param name="networkStructureInfo"></param>
         /// <returns>State of operation success</returns>
         public bool BackupMemory(string memoryFolder, DatabaseConfig dbConfig = null, string networkStructureInfo = "no information")
         {
+            if (_networkTeacher == null)
+            {
+                Logger localLogger = new Logger();
+                localLogger.LogError(ErrorType.OperationWithNonexistentNetwork, "Database memory backuping failed!");
+                return false;
+            }
+
             try
             {
                 if (_networkTeacher.CheckMemory(memoryFolder))
                 {
-                    _networkTeacher.BackupMemory(memoryFolder, ".memory_backups", dbConfig);  
+                    _networkTeacher.BackupMemory(memoryFolder, ".memory_backups", dbConfig, networkStructureInfo);  
                 }
                 else
                 {
@@ -119,12 +189,19 @@ namespace NN.Eva
         }
 
         /// <summary>
-        /// Aborting memory of current neural network
+        /// Aborting network's memory from database
         /// </summary>
-        /// <param name="dbConnection"></param>
+        /// <param name="dbConfig"></param>
         /// <returns>State of operation success</returns>
         public bool DBMemoryAbort(DatabaseConfig dbConfig)
         {
+            if (_networkTeacher == null)
+            {
+                Logger localLogger = new Logger();
+                localLogger.LogError(ErrorType.OperationWithNonexistentNetwork, "Database memory aborting failed!");
+                return false;
+            }
+
             try
             {
                 _networkTeacher.DBMemoryAbort(dbConfig);
@@ -137,8 +214,22 @@ namespace NN.Eva
             }
         }
 
+        /// <summary>
+        /// Loading network's memory from database
+        /// </summary>
+        /// <param name="dbConfig"></param>
+        /// <param name="networkID"></param>
+        /// <param name="destinationMemoryFilePath"></param>
+        /// <returns></returns>
         public bool DBMemoryLoad(DatabaseConfig dbConfig, Guid networkID, string destinationMemoryFilePath)
         {
+            if (_networkTeacher == null)
+            {
+                Logger localLogger = new Logger();
+                localLogger.LogError(ErrorType.OperationWithNonexistentNetwork, "Database memory loading failed!");
+                return false;
+            }
+
             try
             {
                 _networkTeacher.DBMemoryLoad(dbConfig, networkID, destinationMemoryFilePath);

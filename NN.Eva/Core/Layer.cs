@@ -1,7 +1,6 @@
 ﻿using NN.Eva.Services;
 using System;
 using System.Collections.Generic;
-using System.Text;
 using NN.Eva.Core.Database;
 using NN.Eva.Models;
 
@@ -15,7 +14,7 @@ namespace NN.Eva.Core
 
         private Layer() { }
 
-        public Layer(int neuronCount, int weightCount, int layerNumber, FileManager fileManager)
+        public Layer(int neuronCount, int layerNumber, FileManager fileManager)
         {
             double offsetValue = 0.5;
             double offsetWeight = -1;
@@ -29,7 +28,7 @@ namespace NN.Eva.Core
             }
         }
 
-        public Layer(int neuronCount, int weightCount, int layerNumber, FileManager fileManager, string memoryPath)
+        public Layer(int neuronCount, int layerNumber, FileManager fileManager, string memoryPath)
         {
             double offsetValue = 0.5;
             double offsetWeight = -1;
@@ -43,6 +42,8 @@ namespace NN.Eva.Core
             }
         }
 
+        #region Handling
+
         public double[] Handle(double[] data)
         {
             double[] layerResultVector = new double[_neuronList.Count];
@@ -55,13 +56,17 @@ namespace NN.Eva.Core
             return layerResultVector;
         }
 
-        // CALCULATING ERRORS:
+        #endregion
 
-        public void CalcErrorAsOut(double[] rightAnwsersSet)
+        #region Teaching
+
+        #region Error calculating
+
+        public void CalcErrorAsOut(double[] rightAnswersSet)
         {
             for (int i = 0; i < _neuronList.Count; i++)
             {
-                _neuronList[i].CalcErrorForOutNeuron(rightAnwsersSet[i]);
+                _neuronList[i].CalcErrorForOutNeuron(rightAnswersSet[i]);
             }
         }
 
@@ -73,26 +78,38 @@ namespace NN.Eva.Core
             }
         }
 
-        // CHANGE WEIGHTS:
+        #endregion
 
-        public void ChangeWeights(double learnSpeed, double[] anwsersFromPrewLayer)
+        #region Weights changing
+
+        public void ChangeWeightsBProp(double learnSpeed, double[] answersFromPrevLayer)
         {
             for (int i = 0; i < _neuronList.Count; i++)
             {
-                _neuronList[i].ChangeWeights(learnSpeed, anwsersFromPrewLayer);
+                _neuronList[i].ChangeWeightsBProp(learnSpeed, answersFromPrevLayer);
             }
         }
 
-        public double[] GetLastAnwsers()
+        public void ChangeWeightsRProp(double[] updateValues)
         {
-            double[] lastAnwsers = new double[_neuronList.Count];
+            for (int i = 0; i < _neuronList.Count; i++)
+            {
+                _neuronList[i].ChangeWeightsRProp(updateValues[i]);
+            }
+        }
+
+        #endregion
+
+        public double[] GetLastAnswers()
+        {
+            double[] lastAnswers = new double[_neuronList.Count];
 
             for (int i = 0; i < _neuronList.Count; i++)
             {
-                lastAnwsers[i] = _neuronList[i].GetLastAnwser();
+                lastAnswers[i] = _neuronList[i].LastAnswer;
             }
 
-            return lastAnwsers;
+            return lastAnswers;
         }
 
         public double[][] GetWeights()
@@ -101,25 +118,27 @@ namespace NN.Eva.Core
 
             for (int i = 0; i < _neuronList.Count; i++)
             {
-                weights[i] = _neuronList[i].GetWeights();
+                weights[i] = _neuronList[i].Weights;
             }
 
             return weights;
         }
 
-        public double[] GetErrors()
+        public double[] GetNeuronErrors()
         {
             double[] errors = new double[_neuronList.Count];
 
             for (int i = 0; i < _neuronList.Count; i++)
             {
-                errors[i] = _neuronList[i].GetError();
+                errors[i] = _neuronList[i].Error;
             }
 
             return errors;
         }
 
-        // SAVE MEMORY:
+        #endregion
+
+        #region Memory operations
 
         public void SaveMemory(FileManager fileManager, int layerNumber, string path)
         {
@@ -128,6 +147,8 @@ namespace NN.Eva.Core
                 _neuronList[i].SaveMemory(fileManager, layerNumber, i, path);
             }
         }
+
+        #region Database operations
 
         public void SaveMemoryToDB(Guid networkId, Guid userId, int number, DBInserter dbInserter)
         {
@@ -153,40 +174,8 @@ namespace NN.Eva.Core
             dbDeleter.DeleteFromTableLayers(networkId);
         }
 
-        // MEMORY CHECK:
+        #endregion
 
-        public bool IsMemoryEquals(NetworkStructure netStructure, int currentLayerNumber)
-        {
-            // Check for equals count of neurons:
-            if (_neuronList.Count != netStructure.NeuronsByLayers[currentLayerNumber])
-            {
-                return false;
-            }
-
-            // Check for correct count of weights on each neuron:
-            // *If this is first layer check equals with input vector:
-            if (currentLayerNumber == 0)
-            {
-                for (int i = 0; i < _neuronList.Count; i++)
-                {
-                    if (!_neuronList[i].IsMemoryEquals(netStructure.InputVectorLength))
-                    {
-                        return false;
-                    }
-                }
-            }
-            else
-            {
-                for (int i = 0; i < _neuronList.Count; i++)
-                {
-                    if (!_neuronList[i].IsMemoryEquals(netStructure.NeuronsByLayers[currentLayerNumber - 1]))
-                    {
-                        return false;
-                    }
-                }
-            }
-
-            return true;
-        }
+        #endregion
     }
 }

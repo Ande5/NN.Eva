@@ -20,42 +20,12 @@ namespace NN.Eva.Services
         /// </summary>
         public string MemoryFolderPath;
 
+        /// <summary>
+        /// Result of success of network creating
+        /// </summary>
         public bool IsMemoryLoadCorrect;
 
         private Logger _logger;
-
-        /// <summary>
-        /// Uses only for checking memory validity
-        /// </summary>
-        /// <param name="memoryFolderPath"></param>
-        public FileManager(string memoryFolderPath = "Memory", string defaultMemoryFilePath = "memoryClear.txt")
-        {
-            IsMemoryLoadCorrect = true;
-
-            _logger = new Logger();
-
-            DefaultMemoryFilePath = defaultMemoryFilePath;
-            MemoryFolderPath = memoryFolderPath;
-
-            // Check for existing memory folder:
-            if (!Directory.Exists(MemoryFolderPath))
-            {
-                Directory.CreateDirectory(MemoryFolderPath);
-            }
-
-            // Запуск процесса генерации памяти в случае ее отсутствия:
-            if (!File.Exists(MemoryFolderPath + "//.clear//" + DefaultMemoryFilePath))
-            {
-                _logger.LogError(ErrorType.MemoryMissing);
-
-                Directory.CreateDirectory(MemoryFolderPath + "//.clear");
-
-                Console.WriteLine("Start generating process...");
-                ServiceWeightsGenerator weightsGenerator = new ServiceWeightsGenerator();
-
-                weightsGenerator.GenerateMemory(MemoryFolderPath + "//.clear//" + DefaultMemoryFilePath);
-            }
-        }
 
         /// <summary>
         /// Main use
@@ -65,6 +35,12 @@ namespace NN.Eva.Services
         /// <param name="defaultMemoryFilePath"></param>
         public FileManager(NetworkStructure netStructure = null, string memoryFolderPath = "Memory", string defaultMemoryFilePath = "memoryClear.txt")
         {
+            if (memoryFolderPath == "" || defaultMemoryFilePath == "")
+            {
+                IsMemoryLoadCorrect = false;
+                return;
+            }
+
             IsMemoryLoadCorrect = true;
 
             _logger = new Logger();
@@ -110,6 +86,11 @@ namespace NN.Eva.Services
             }
         }
 
+        /// <summary>
+        /// Checking memory for equaling to checked
+        /// </summary>
+        /// <param name="memoryPathToCheck"></param>
+        /// <returns></returns>
         public bool IsMemoryEqualsDefault(string memoryPathToCheck)
         {
             FileInfo fileDefaultMemory = new FileInfo(MemoryFolderPath + "//.clear//" + DefaultMemoryFilePath);
@@ -119,6 +100,14 @@ namespace NN.Eva.Services
             return Math.Abs(fileDefaultMemory.Length - fileToCheck.Length) < fileDefaultMemory.Length * 0.5;
         }
 
+        /// <summary>
+        /// Loading network's clear memory
+        /// </summary>
+        /// <param name="layerNumber"></param>
+        /// <param name="neuronNumber"></param>
+        /// <param name="offsetValue"></param>
+        /// <param name="offsetWeight"></param>
+        /// <returns></returns>
         public double[] LoadMemory(int layerNumber, int neuronNumber, ref double offsetValue, ref double offsetWeight)
         {
             double[] memory = new double[0];
@@ -131,9 +120,8 @@ namespace NN.Eva.Services
 
                     if ((readedLine[0] == "layer_" + layerNumber) && (readedLine[1] == "neuron_" + neuronNumber))
                     {
-                        // TODO: Еще протестировать на других настройках осей
-                        offsetValue = double.Parse(readedLine[2].Replace('.', ','));
-                        offsetWeight = double.Parse(readedLine[3].Replace('.', ','));
+                        offsetValue = double.Parse(readedLine[2], new CultureInfo("ru-RU"));
+                        offsetWeight = double.Parse(readedLine[3], new CultureInfo("ru-RU"));
                         memory = GetWeights(readedLine);
                         break;
                     }
@@ -143,6 +131,15 @@ namespace NN.Eva.Services
             return memory;
         }
 
+        /// <summary>
+        /// Loading network's exists memory from memory-file
+        /// </summary>
+        /// <param name="layerNumber"></param>
+        /// <param name="neuronNumber"></param>
+        /// <param name="memoryPath"></param>
+        /// <param name="offsetValue"></param>
+        /// <param name="offsetWeight"></param>
+        /// <returns></returns>
         public double[] LoadMemory(int layerNumber, int neuronNumber, string memoryPath, ref double offsetValue, ref double offsetWeight)
         {
             double[] memory = new double[0];
@@ -162,10 +159,10 @@ namespace NN.Eva.Services
 
                     if ((readedLine[0] == "layer_" + layerNumber) && (readedLine[1] == "neuron_" + neuronNumber))
                     {
-                        // TODO: Еще протестировать на других настройках осей
-                        offsetValue = double.Parse(readedLine[2].Replace('.', ','));
-                        offsetWeight = double.Parse(readedLine[3].Replace('.', ','));
+                        offsetValue = double.Parse(readedLine[2], new CultureInfo("ru-RU"));
+                        offsetWeight = double.Parse(readedLine[3], new CultureInfo("ru-RU"));
                         memory = GetWeights(readedLine);
+                        break;
                     }
                 }
             }
@@ -185,6 +182,11 @@ namespace NN.Eva.Services
             return weights;
         }
 
+        /// <summary>
+        /// Used in saving method for preparing memory files to saving procedure
+        /// </summary>
+        /// <param name="path"></param>
+        /// <param name="networkStructure"></param>
         public void PrepareToSaveMemory(string path, NetworkStructure networkStructure)
         {
             try
@@ -193,36 +195,22 @@ namespace NN.Eva.Services
             }
             catch { }
 
+            WriteNetworkMetadata(networkStructure, path);
+        }
+
+        private void WriteNetworkMetadata(NetworkStructure networkStructure, string path)
+        {
             // Запись мета данных в начало файла памяти:
             using (StreamWriter fileWriter = new StreamWriter(path))
             {
                 fileWriter.Write(networkStructure.InputVectorLength);
 
-                for(int i = 0; i < networkStructure.NeuronsByLayers.Length; i++)
+                for (int i = 0; i < networkStructure.NeuronsByLayers.Length; i++)
                 {
                     fileWriter.Write(" " + networkStructure.NeuronsByLayers[i]);
                 }
 
                 fileWriter.WriteLine();
-            }
-        }
-
-        public NetworkStructure ReadNetworkMetadata(string path)
-        {
-            using (StreamReader fileReader = new StreamReader(path))
-            {
-                string[] readedLine = fileReader.ReadLine().Split(' ');
-
-                NetworkStructure networkStructure = new NetworkStructure();
-                networkStructure.InputVectorLength = Int32.Parse(readedLine[0]);
-                networkStructure.NeuronsByLayers = new int[readedLine.Length - 1];
-
-                for(int i = 1; i < readedLine.Length; i++)
-                {
-                    networkStructure.NeuronsByLayers[i - 1] = Int32.Parse(readedLine[i]);
-                }
-
-                return networkStructure;
             }
         }
 
@@ -237,7 +225,9 @@ namespace NN.Eva.Services
         {
             using (StreamWriter fileWriter = new StreamWriter(path, true))
             {
-                fileWriter.Write("layer_{0} neuron_{1} {2} {3}", layerNumber, neuronNumber, offsetValue, offsetWeight);
+                fileWriter.Write("layer_{0} neuron_{1} {2} {3}", layerNumber, neuronNumber, 
+                                                                 offsetValue.ToString().Replace('.', ','),
+                                                                 offsetWeight.ToString().Replace('.', ','));
 
                 for (int i = 0; i < weights.Length; i++)
                 {
@@ -252,9 +242,11 @@ namespace NN.Eva.Services
         /// Saving memory from textList memory-model
         /// </summary>
         /// <param name="memoryInTextList"></param>
-        public void SaveMemoryFromModel(List<string> memoryInTextList, string destinationMemoryFilePath)
+        public void SaveMemoryFromModel(NetworkStructure networkStructure, List<string> memoryInTextList, string destinationMemoryFilePath)
         {
-            using(StreamWriter fileWriter = new StreamWriter(destinationMemoryFilePath))
+            WriteNetworkMetadata(networkStructure, destinationMemoryFilePath);
+
+            using(StreamWriter fileWriter = new StreamWriter(destinationMemoryFilePath, true))
             {
                 for (int i = 0; i < memoryInTextList.Count; i++)
                 {
@@ -263,6 +255,96 @@ namespace NN.Eva.Services
             }
         }
 
+        /// <summary>
+        /// Saving memory from network's weights and structure
+        /// </summary>
+        /// <param name="weights"></param>
+        /// <param name="networkStructure"></param>
+        public void SaveMemoryFromWeightsAndStructure(List<double> weights, NetworkStructure networkStructure)
+        {
+            WriteNetworkMetadata(networkStructure, MemoryFolderPath + "//memory.txt");
+            int index = 0;
+
+            double offsetValue = 0.5;
+            double offsetWeight = -1;
+
+            using (StreamWriter fileWriter = new StreamWriter(MemoryFolderPath + "//memory.txt", true))
+            {
+                // Save the first layer:
+                for (int i = 0; i < networkStructure.NeuronsByLayers[0]; i++)
+                {
+                    fileWriter.Write("layer_0 neuron_{0} {1} {2}",
+                                                        i,
+                                                        offsetValue.ToString().Replace('.', ','),
+                                                        offsetWeight.ToString().Replace('.', ','));
+
+                    for (int k = 0; k < networkStructure.InputVectorLength; k++)
+                    {
+                        fileWriter.Write(" " + weights[index].ToString().Replace('.', ','));
+                        index++;
+                    }
+
+                    fileWriter.WriteLine();
+                }
+
+                // Save the other layers:
+                for (int i = 1; i < networkStructure.NeuronsByLayers.Length; i++)
+                {
+                    for (int k = 0; k < networkStructure.NeuronsByLayers[i]; k++)
+                    {
+                        fileWriter.Write("layer_{0} neuron_{1} {2} {3}",
+                                                                        i,
+                                                                        k,
+                                                                        offsetValue.ToString().Replace('.', ','),
+                                                                        offsetWeight.ToString().Replace('.', ','));
+
+                        for (int j = 0; j < networkStructure.NeuronsByLayers[i - 1]; j++)
+                        {
+                            fileWriter.Write(" " + weights[index].ToString().Replace('.', ','));
+                            index++;
+                        }
+
+                        fileWriter.WriteLine();
+                    }
+                }
+            }
+        }
+
+        public List<double> LoadWholeMemoryFile(string fullMemoryPath)
+        {
+            List<double> memoryWeights = new List<double>();
+
+            using (StreamReader fileReader = new StreamReader(fullMemoryPath))
+            {
+                try
+                {
+                    // Skip metadata:
+                    fileReader.ReadLine();
+
+                    while (!fileReader.EndOfStream)
+                    {
+                        string[] readedLine = fileReader.ReadLine().Split(' ');
+
+                        for (int i = 4; i < readedLine.Length; i++)
+                        {
+                            memoryWeights.Add(double.Parse(readedLine[i], new CultureInfo("ru-RU")));
+                        }
+                    }
+                }
+                catch
+                {
+                    return new List<double>();
+                }
+            }
+
+            return memoryWeights;
+        }
+
+        /// <summary>
+        /// Loading testing dataset
+        /// </summary>
+        /// <param name="filePath"></param>
+        /// <returns></returns>
         public List<TrainObject> LoadTestDataset(string filePath)
         {
             if (!File.Exists(filePath))
@@ -285,7 +367,7 @@ namespace NN.Eva.Services
 
                     for (int i = 0; i < readedData.Length - 1 - additionalSpaceIndex; i++)
                     {
-                        inputVector[i] = double.Parse(readedData[i + 1]);
+                        inputVector[i] = double.Parse(readedData[i + 1], CultureInfo.GetCultureInfo("ru-RU"));
                     }
 
                     vectors.Add(new TrainObject(readedData[0], inputVector));
@@ -295,6 +377,11 @@ namespace NN.Eva.Services
             return vectors;
         }
 
+        /// <summary>
+        /// Loading training dataset
+        /// </summary>
+        /// <param name="path"></param>
+        /// <returns></returns>
         public List<double[]> LoadTrainingDataset(string path)
         {
             List<double[]> sets = new List<double[]>();
@@ -308,7 +395,7 @@ namespace NN.Eva.Services
 
                     for (int i = 0; i < readedLine.Length; i++)
                     {
-                        set[i] = double.Parse(readedLine[i]);
+                        set[i] = double.Parse(readedLine[i], CultureInfo.GetCultureInfo("ru-RU"));
                     }
 
                     sets.Add(set);

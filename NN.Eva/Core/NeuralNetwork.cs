@@ -11,39 +11,73 @@ namespace NN.Eva.Core
         public Guid Id { get; set; } = Guid.NewGuid();
 
         protected List<Layer> _layerList = new List<Layer>();
+
         private readonly FileManager _fileManager;
 
         protected NeuralNetwork() { }
 
-        public NeuralNetwork(int receptorsNumber, int[] neuronsNumberByLayers, FileManager fileManager)
+        public NeuralNetwork(int[] neuronsNumberByLayers, FileManager fileManager)
         {
             _fileManager = fileManager;
 
-            Layer firstLayer = new Layer(neuronsNumberByLayers[0], receptorsNumber, 0, fileManager);
+            Layer firstLayer = new Layer(neuronsNumberByLayers[0], 0, fileManager);
             _layerList.Add(firstLayer);
 
             for (int i = 1; i < neuronsNumberByLayers.Length; i++)
             {
-                Layer layer = new Layer(neuronsNumberByLayers[i], neuronsNumberByLayers[i - 1], i, fileManager);
+                Layer layer = new Layer(neuronsNumberByLayers[i], i, fileManager);
                 _layerList.Add(layer);
             }
         }
 
-        public NeuralNetwork(int receptorsNumber, int[] neuronsNumberByLayers, FileManager fileManager, string memoryPath)
+        public NeuralNetwork(int[] neuronsNumberByLayers, FileManager fileManager, string memoryPath)
         {
             _fileManager = fileManager;
 
-            Layer firstLayer = new Layer(neuronsNumberByLayers[0], receptorsNumber, 0, fileManager, memoryPath);
+            Layer firstLayer = new Layer(neuronsNumberByLayers[0], 0, fileManager, memoryPath);
             _layerList.Add(firstLayer);
 
             for (int i = 1; i < neuronsNumberByLayers.Length; i++)
             {
-                Layer layer = new Layer(neuronsNumberByLayers[i], neuronsNumberByLayers[i - 1], i, fileManager, memoryPath);
+                Layer layer = new Layer(neuronsNumberByLayers[i], i, fileManager, memoryPath);
                 _layerList.Add(layer);
             }
         }
 
-        public double[] Handle(double[] data)
+        #region Handling
+
+        /// <summary>
+        /// Handling data
+        /// </summary>
+        /// <param name="data"></param>
+        /// <param name="errorText"></param>
+        /// <returns></returns>
+        public double[] Handle(double[] data, ref string errorText)
+        {
+            // Check for non equaling of input length of data and network's receptors:
+            if (data.Length != _layerList[0].GetWeights()[0].Length)
+            {
+                errorText = String.Format("Expected by network input-vector length: {0}\nInputed data-vector length: {1}", _layerList[0].GetWeights()[0].Length, data.Length);
+                return null;
+            }
+
+            double[] tempData = data;
+
+            for (int i = 0; i < _layerList.Count; i++)
+            {
+                tempData = _layerList[i].Handle(tempData);
+            }
+
+            // There is one double value at the last handle
+            return tempData;
+        }
+
+        /// <summary>
+        /// Handling data without vector's length check
+        /// </summary>
+        /// <param name="data"></param>
+        /// <returns></returns>
+        public double[] HandleUnsafe(double[] data)
         {
             double[] tempData = data;
 
@@ -53,37 +87,76 @@ namespace NN.Eva.Core
             }
 
             // There is one double value at the last handle
-
-            return HandleNetAnwser(tempData);
+            return tempData;
         }
 
-        private double[] HandleNetAnwser(double[] netResult)
-        {
-            return netResult;
-        }
+        #endregion
 
-        public void Teach(double[] data, double[] rightAnwsersSet, double learnSpeed)
+        #region Teaching
+
+        public void CalculateErrors(double[] rightAnswersSet)
         {
-            // Подсчет ошибки:
-            _layerList[_layerList.Count - 1].CalcErrorAsOut(rightAnwsersSet);
+            _layerList[_layerList.Count - 1].CalcErrorAsOut(rightAnswersSet);
 
             for (int i = _layerList.Count - 2; i >= 0; i--)
             {
                 double[][] nextLayerWeights = _layerList[i + 1].GetWeights();
-                double[] nextLayerErrors = _layerList[i + 1].GetErrors();
+                double[] nextLayerErrors = _layerList[i + 1].GetNeuronErrors();
 
                 _layerList[i].CalcErrorAsHidden(nextLayerWeights, nextLayerErrors);
             }
+        }
 
-            // Корректировка весов нейронов:
-            double[] anwsersFromPrewLayer = data;
+        public List<double[]> GetNeuronErrors()
+        {
+            List<double[]> errorList = new List<double[]>();
 
             for (int i = 0; i < _layerList.Count; i++)
             {
-                _layerList[i].ChangeWeights(learnSpeed, anwsersFromPrewLayer);
-                anwsersFromPrewLayer = _layerList[i].GetLastAnwsers();
+                errorList.Add(_layerList[i].GetNeuronErrors());
+            }
+
+            return errorList;
+        }
+
+        public List<double[]> GetLastNeuronAnswers()
+        {
+            List<double[]> answersList = new List<double[]>();
+
+            for (int i = 0; i < _layerList.Count; i++)
+            {
+                answersList.Add(_layerList[i].GetLastAnswers());
+            }
+
+            return answersList;
+        }
+
+        public void TeachBProp(double[] data, double[] rightAnswersSet, double learnSpeed)
+        {
+            // Подсчет ошибки (внутреннее изменение):
+            CalculateErrors(rightAnswersSet);
+
+            // Корректировка весов нейронов:
+            double[] answersFromPrevLayer = data;
+
+            for (int i = 0; i < _layerList.Count; i++)
+            {
+                _layerList[i].ChangeWeightsBProp(learnSpeed, answersFromPrevLayer);
+                answersFromPrevLayer = _layerList[i].GetLastAnswers();
             }
         }
+
+        public void TeachRProp(List<double[]> updateValues)
+        {
+            for (int i = 0; i < _layerList.Count; i++)
+            {
+                _layerList[i].ChangeWeightsRProp(updateValues[i]);
+            }
+        }
+
+        #endregion
+
+        #region Memory saving/loading
 
         public void SaveMemory(string path, NetworkStructure networkStructure)
         {
@@ -96,6 +169,8 @@ namespace NN.Eva.Core
                 _layerList[i].SaveMemory(_fileManager, i, path);
             }
         }
+
+        #region Database operations
 
         public void SaveMemoryToDB(int iterations, string networkStructure, Guid userId, DBInserter dbInserter)
         {
@@ -121,26 +196,8 @@ namespace NN.Eva.Core
             dbDeleter.DeleteFromTableNetworks(Id);
         }
 
-        // MEMORY CHECK:
+        #endregion
 
-        public bool IsMemoryEquals(NetworkStructure netStructure)
-        {
-            // Check for equals count of layers:
-            if (_layerList.Count != netStructure.NeuronsByLayers.Length)
-            {
-                return false;
-            }
-
-            // Check for equals count of neurons on each layer:
-            for (int i = 0; i < _layerList.Count; i++)
-            {
-                if (!_layerList[i].IsMemoryEquals(netStructure, i))
-                {
-                    return false;
-                }
-            }
-
-            return true;
-        }
+        #endregion
     }
 }
