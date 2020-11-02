@@ -8,42 +8,31 @@ using NN.Eva.Services.WeightsGenerator;
 
 namespace NN.Eva.Services
 {
-    public class FileManager
+    public static class FileManager
     {
         /// <summary>
         /// Path of default memory
         /// </summary>
-        public string DefaultMemoryFilePath;
+        public static string DefaultMemoryFilePath;
 
         /// <summary>
         /// Path of a memory folder
         /// </summary>
-        public string MemoryFolderPath;
+        public static string MemoryFolderPath;
 
         /// <summary>
-        /// Result of success of network creating
-        /// </summary>
-        public bool IsMemoryLoadCorrect;
-
-        private Logger _logger;
-
-        /// <summary>
-        /// Main use
+        /// Chack for correct memory at all
         /// </summary>
         /// <param name="netStructure"></param>
         /// <param name="memoryFolderPath"></param>
         /// <param name="defaultMemoryFilePath"></param>
-        public FileManager(NetworkStructure netStructure = null, string memoryFolderPath = "Memory", string defaultMemoryFilePath = "memoryClear.txt")
+        /// <returns>State of memory integrity</returns>
+        public static bool CheckMemoryIntegrity(NetworkStructure netStructure = null, string memoryFolderPath = "Memory", string defaultMemoryFilePath = "memoryClear.txt")
         {
             if (memoryFolderPath == "" || defaultMemoryFilePath == "")
             {
-                IsMemoryLoadCorrect = false;
-                return;
+                return false;
             }
-
-            IsMemoryLoadCorrect = true;
-
-            _logger = new Logger();
 
             DefaultMemoryFilePath = defaultMemoryFilePath;
             MemoryFolderPath = memoryFolderPath;
@@ -57,7 +46,7 @@ namespace NN.Eva.Services
             // Запуск процесса генерации памяти в случае ее отсутствия:
             if (!File.Exists(MemoryFolderPath + "//.clear//" + DefaultMemoryFilePath))
             {
-                _logger.LogError(ErrorType.MemoryMissing);
+                Logger.LogError(ErrorType.MemoryMissing);
 
                 Directory.CreateDirectory(MemoryFolderPath + "//.clear");
 
@@ -72,6 +61,8 @@ namespace NN.Eva.Services
                 {
                     weightsGenerator.GenerateMemory(MemoryFolderPath + "//.clear//" + DefaultMemoryFilePath);
                 }
+
+                return true;
             }
             else
             {
@@ -80,9 +71,11 @@ namespace NN.Eva.Services
                 
                 if (!memoryChecker.IsValid(MemoryFolderPath + "//.clear//" + DefaultMemoryFilePath, netStructure))
                 {
-                    IsMemoryLoadCorrect = false;
-                    _logger.LogError(ErrorType.MemoryInitializeError);
+                    Logger.LogError(ErrorType.MemoryInitializeError);
+                    return false;
                 }
+
+                return true;
             }
         }
 
@@ -91,7 +84,7 @@ namespace NN.Eva.Services
         /// </summary>
         /// <param name="memoryPathToCheck"></param>
         /// <returns></returns>
-        public bool IsMemoryEqualsDefault(string memoryPathToCheck)
+        public static bool IsMemoryEqualsDefault(string memoryPathToCheck)
         {
             FileInfo fileDefaultMemory = new FileInfo(MemoryFolderPath + "//.clear//" + DefaultMemoryFilePath);
             FileInfo fileToCheck = new FileInfo(MemoryFolderPath + "//" + memoryPathToCheck);
@@ -108,7 +101,7 @@ namespace NN.Eva.Services
         /// <param name="offsetValue"></param>
         /// <param name="offsetWeight"></param>
         /// <returns></returns>
-        public double[] LoadMemory(int layerNumber, int neuronNumber, ref double offsetValue, ref double offsetWeight)
+        public static double[] LoadMemory(int layerNumber, int neuronNumber, ref double offsetValue, ref double offsetWeight)
         {
             double[] memory = new double[0];
 
@@ -140,7 +133,7 @@ namespace NN.Eva.Services
         /// <param name="offsetValue"></param>
         /// <param name="offsetWeight"></param>
         /// <returns></returns>
-        public double[] LoadMemory(int layerNumber, int neuronNumber, string memoryPath, ref double offsetValue, ref double offsetWeight)
+        public static double[] LoadMemory(int layerNumber, int neuronNumber, string memoryPath, ref double offsetValue, ref double offsetWeight)
         {
             double[] memory = new double[0];
 
@@ -170,7 +163,7 @@ namespace NN.Eva.Services
             return memory;
         }
 
-        private double[] GetWeights(string[] readedLine)
+        private static double[] GetWeights(string[] readedLine)
         {
             double[] weights = new double[readedLine.Length - 4];
 
@@ -187,7 +180,7 @@ namespace NN.Eva.Services
         /// </summary>
         /// <param name="path"></param>
         /// <param name="networkStructure"></param>
-        public void PrepareToSaveMemory(string path, NetworkStructure networkStructure)
+        public static void PrepareToSaveMemory(string path, NetworkStructure networkStructure)
         {
             try
             {
@@ -198,7 +191,7 @@ namespace NN.Eva.Services
             WriteNetworkMetadata(networkStructure, path);
         }
 
-        private void WriteNetworkMetadata(NetworkStructure networkStructure, string path)
+        private static void WriteNetworkMetadata(NetworkStructure networkStructure, string path)
         {
             // Запись мета данных в начало файла памяти:
             using (StreamWriter fileWriter = new StreamWriter(path))
@@ -221,7 +214,7 @@ namespace NN.Eva.Services
         /// <param name="neuronNumber"></param>
         /// <param name="weights"></param>
         /// <param name="path"></param>
-        public void SaveMemory(int layerNumber, int neuronNumber, double[] weights, double offsetValue, double offsetWeight, string path)
+        public static void SaveMemory(int layerNumber, int neuronNumber, double[] weights, double offsetValue, double offsetWeight, string path)
         {
             using (StreamWriter fileWriter = new StreamWriter(path, true))
             {
@@ -242,7 +235,7 @@ namespace NN.Eva.Services
         /// Saving memory from textList memory-model
         /// </summary>
         /// <param name="memoryInTextList"></param>
-        public void SaveMemoryFromModel(NetworkStructure networkStructure, List<string> memoryInTextList, string destinationMemoryFilePath)
+        public static void SaveMemoryFromModel(NetworkStructure networkStructure, List<string> memoryInTextList, string destinationMemoryFilePath)
         {
             WriteNetworkMetadata(networkStructure, destinationMemoryFilePath);
 
@@ -260,7 +253,7 @@ namespace NN.Eva.Services
         /// </summary>
         /// <param name="weights"></param>
         /// <param name="networkStructure"></param>
-        public void SaveMemoryFromWeightsAndStructure(List<double> weights, NetworkStructure networkStructure)
+        public static void SaveMemoryFromWeightsAndStructure(List<double> weights, NetworkStructure networkStructure)
         {
             WriteNetworkMetadata(networkStructure, MemoryFolderPath + "//memory.txt");
             int index = 0;
@@ -310,7 +303,7 @@ namespace NN.Eva.Services
             }
         }
 
-        public List<double> LoadWholeMemoryFile(string fullMemoryPath)
+        public static List<double> LoadWholeMemoryFile(string fullMemoryPath)
         {
             List<double> memoryWeights = new List<double>();
 
@@ -345,11 +338,11 @@ namespace NN.Eva.Services
         /// </summary>
         /// <param name="filePath"></param>
         /// <returns></returns>
-        public List<TrainObject> LoadTestDataset(string filePath)
+        public static List<TrainObject> LoadTestDataset(string filePath)
         {
             if (!File.Exists(filePath))
             {
-                _logger.LogError(ErrorType.SetMissing, filePath + "is missing!");
+                Logger.LogError(ErrorType.SetMissing, filePath + "is missing!");
                 return null;
             }
 
@@ -382,7 +375,7 @@ namespace NN.Eva.Services
         /// </summary>
         /// <param name="path"></param>
         /// <returns></returns>
-        public List<double[]> LoadTrainingDataset(string path)
+        public static List<double[]> LoadTrainingDataset(string path)
         {
             List<double[]> sets = new List<double[]>();
 

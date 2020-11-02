@@ -18,9 +18,9 @@ namespace NN.Eva.Test
 
             TrainingConfiguration trainConfig = new TrainingConfiguration
             {
-                TrainingAlgorithmType = TrainingAlgorithmType.GeneticAlg,
+                TrainingAlgorithmType = TrainingAlgorithmType.RProp,
                 StartIteration = 0,
-                EndIteration = 3000,
+                EndIteration = 10,
                 InputDatasetFilename = "TrainingSets//inputSets.txt",
                 OutputDatasetFilename = "TrainingSets//outputSets.txt",
                 MemoryFolder = "Memory"
@@ -33,9 +33,9 @@ namespace NN.Eva.Test
                 //serviceEvaNN.CalculateStatistic(trainConfig);
                 serviceEvaNN.Train(trainConfig,
                                    true,
-                                   ProcessPriorityClass.High,
+                                   ProcessPriorityClass.Normal,
                                    true);
-                //serviceEvaNN.CalculateStatistic(trainConfig);
+                serviceEvaNN.CalculateStatistic(trainConfig);
             }
 
             Console.WriteLine("Done!");
